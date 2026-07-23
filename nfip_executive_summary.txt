@@ -1,0 +1,22 @@
+# Resumen Ejecutivo: Forecast de Pérdidas NFIP (8 trimestres)
+
+El forecast trimestral muestra un patrón estacional claro: el riesgo se concentra en los trimestres de mitad de año.
+
+**Concentración del riesgo catastrófico**
+
+Los trimestres **2026-07-01 y 2027-07-01** presentan la probabilidad de evento catastrófico más alta del período: **31.2%**, muy por encima del resto de los trimestres (que van de 0% a 6.2%). Esto significa que, según el modelo, hay casi 1 de cada 3 posibilidades de que ocurra un evento catastrófico en cada uno de esos trimestres. Los trimestres de octubre y abril muestran un riesgo moderado (4.2%–6.2%), y los de enero un riesgo prácticamente nulo (0%).
+
+**Magnitud de la cola de pérdidas**
+
+Para dimensionar el riesgo usamos la **mediana** (el escenario más típico) y el **P99** (el peor escenario dentro de los considerados, superado solo 1 de cada 100 veces).
+
+La brecha entre ambos es extrema, especialmente en los trimestres de julio:
+
+- **2026-07-01**: mediana de $1,240M vs. P99 de $75,064M — un múltiplo de aproximadamente 60x.
+- **2027-07-01**: mediana de $942M vs. P99 de $86,485M — un múltiplo de aproximadamente 92x.
+
+En los trimestres de menor riesgo (enero), esa brecha es mucho menor: en 2026-01-01, la mediana es $116M y el P99 es $2,526M (múltiplo ~22x).
+
+**Lectura para el comité**
+
+No estamos afirmando que un evento catastrófico específico vaya a ocurrir en julio de 2026 o 2027. Lo que muestra el modelo es que, *si* ocurre un evento de cola en esos trimestres, la magnitud potencial de pérdida es órdenes de magnitud superior al escenario típico. Esto tiene implicancias directas para el dimensionamiento de reservas y la estructura de reinsurance en los trimestres de mayor probabilidad catastrófica.
