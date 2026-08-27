@@ -1,3 +1,4 @@
+
 """
 Paso 8 (final): Narrativa ejecutiva automática con la API de Claude,
 a partir del forecast combinado (frecuencia + severidad + EVT).
@@ -9,13 +10,13 @@ prompt (restricciones explícitas de no inventar causas, no afirmar
 certeza, evitar lenguaje ambiguo, y explicar términos técnicos), no de
 ese parámetro.
 """
+from config import CLAUDE_MODEL, MAX_TOKENS_NARRATIVA, MAX_VUELTAS_AGENTE
 
 import os
 import anthropic
 import pandas as pd
 
 FORECAST_FILE = "nfip_final_combined_forecast.csv"
-MODEL = "claude-sonnet-5"
 
 
 def build_prompt(df):
@@ -69,10 +70,13 @@ def generate_narrative():
 
     client = anthropic.Anthropic(api_key=api_key)
     response = client.messages.create(
-        model=MODEL, max_tokens=900,
+        model= CLAUDE_MODEL, max_tokens=MAX_TOKENS_NARRATIVA,
         messages=[{"role": "user", "content": prompt}],
     )
-    return response.content[0].text
+    # La respuesta puede traer varios bloques (thinking, text, tool_use).
+    # Nos quedamos solo con los de texto y los unimos.
+    partes = [b.text for b in response.content if b.type == "text"]
+    return "\n".join(partes)
 
 
 if __name__ == "__main__":
