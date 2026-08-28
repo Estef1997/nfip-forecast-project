@@ -3,7 +3,8 @@ nfip_agent.py -- Agente sobre el forecast NFIP.
 Usa herramientas reales (consultar_trimestre, filtrar_trimestres_riesgo)
 que Claude decide cuándo y cómo invocar, según la pregunta en lenguaje natural.
 """
-
+from config import CLAUDE_MODEL, MAX_TOKENS_AGENTE, MAX_VUELTAS_AGENTE
+from datetime import datetime
 import anthropic
 import pandas as pd
 import json
@@ -13,6 +14,7 @@ import os
 
 df = pd.read_csv("nfip_final_combined_forecast.csv")
 df["quarter"] = df["quarter"].astype(str)
+
 
 def consultar_trimestre(quarter: str) -> dict:
     """Devuelve los datos de forecast de un trimestre específico."""
@@ -27,6 +29,7 @@ def consultar_trimestre(quarter: str) -> dict:
         "p90_M": float(row["loss_p90_M"]),
         "p99_M": float(row["loss_p99_M"]),
     }
+
 
 def filtrar_trimestres_riesgo(umbral: float) -> list:
     """Devuelve los trimestres cuya probabilidad catastrófica supera el umbral dado (0.0 a 1.0)."""
@@ -59,7 +62,7 @@ tools = [
             "properties": {
                 "umbral": {
                     "type": "number",
-                    "description": "Umbral de probabilidad entre 0.0 y 1.0, ej. 0.10 para 10%"
+                    "description": "Umbral de probabilidad entre 0.0 y 1.0. En el forecast actual las probabilidades observadas van de 0.0 a 0.312, así que umbrales por encima de 0.32 no devuelven resultados."
                 }
             },
             "required": ["umbral"]
@@ -68,7 +71,30 @@ tools = [
 ]
 
 
-# --- Bloque 3: El loop del agente (con límite de seguridad) ---
+# --- Bloque 3: Logging de las decisiones del agente ---
+
+LOG_FILE = "agent_log.jsonl"
+
+
+def loggear_vuelta(pregunta, vuelta, herramienta, tool_input, resultado):
+    """Persiste una vuelta del loop del agente a un archivo JSONL.
+
+    Cada línea es un objeto JSON independiente, así el archivo se puede
+    leer incrementalmente y crece sin reescribirse.
+    """
+    registro = {
+        "timestamp": datetime.now().isoformat(),
+        "pregunta": pregunta,
+        "vuelta": vuelta,
+        "herramienta": herramienta,
+        "input": tool_input,
+        "resultado": str(resultado)[:500],
+    }
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(registro, ensure_ascii=False) + "\n")
+
+
+# --- Bloque 4: El loop del agente (con límite de seguridad) ---
 
 def ejecutar_herramienta(name, tool_input):
     if name == "consultar_trimestre":
@@ -76,14 +102,15 @@ def ejecutar_herramienta(name, tool_input):
     elif name == "filtrar_trimestres_riesgo":
         return filtrar_trimestres_riesgo(tool_input["umbral"])
 
-def preguntar_al_agente(pregunta_usuario, max_vueltas=5):
+
+def preguntar_al_agente(pregunta_usuario, max_vueltas=MAX_VUELTAS_AGENTE):
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     messages = [{"role": "user", "content": pregunta_usuario}]
 
     for vuelta in range(max_vueltas):
         response = client.messages.create(
-            model="claude-sonnet-5",
-            max_tokens=1024,
+            model=CLAUDE_MODEL,
+            max_tokens=MAX_TOKENS_AGENTE,
             tools=tools,
             messages=messages,
         )
@@ -97,6 +124,7 @@ def preguntar_al_agente(pregunta_usuario, max_vueltas=5):
             if block.type == "tool_use":
                 print(f"  [Vuelta {vuelta+1}/{max_vueltas} -- Agente decidió usar: {block.name}({block.input})]")
                 result = ejecutar_herramienta(block.name, block.input)
+                loggear_vuelta(pregunta_usuario, vuelta + 1, block.name, block.input, result)
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
@@ -107,7 +135,7 @@ def preguntar_al_agente(pregunta_usuario, max_vueltas=5):
     return f"[Se alcanzó el límite de {max_vueltas} vueltas sin llegar a una respuesta final -- revisá el diseño del prompt/herramientas]"
 
 
-# --- Bloque 4: Probarlo ---
+# --- Bloque 5: Probarlo ---
 
 if __name__ == "__main__":
     pregunta = input("Preguntale algo al agente sobre el forecast NFIP: ")
