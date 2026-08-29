@@ -7,3 +7,4 @@ nfip_claims_raw.parquet
 nfip_claims_sample.parquet
 checkpoint.json
 .DS_Store
+agent_log.jsonl
