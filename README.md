@@ -23,6 +23,7 @@ mismo qué calcular en cada caso.
 8. [Estructura del repositorio](#estructura-del-repositorio)
 9. [Cómo correr el proyecto](#cómo-correr-el-proyecto)
 10. [Próximos pasos naturales en producción](#próximos-pasos-naturales-en-producción)
+
 ---
 
 ## Contexto de negocio
@@ -156,6 +157,13 @@ catastróficos históricos (75%) cayeron en Q3. La probabilidad catastrófica
 se calculó por trimestre del año en vez de como un promedio parejo:
 `{Q1: 0.0, Q2: 0.062, Q3: 0.312, Q4: 0.042}`.
 
+El valor de 0.0 para Q1 es una estimación de frecuencia empírica, no una
+afirmación de imposibilidad: significa que ninguno de los ~48 primeros
+trimestres del histórico superó el umbral catastrófico. Con esa cantidad de
+observaciones, el intervalo de confianza superior de esa probabilidad sigue
+siendo distinto de cero, de modo que el modelo subestima el riesgo invernal
+en lugar de descartarlo.
+
 ### Paso 7 — Combinación final (Monte Carlo)
 
 20,000 simulaciones por trimestre de forecast, combinando el resultado
@@ -192,7 +200,8 @@ errores reales observados en las primeras corridas:
 La llamada usa el modelo `claude-sonnet-5` sin el parámetro `temperature`
 (deprecado en la generación actual de modelos Claude — el control de
 precisión de la narrativa queda a cargo del diseño del prompt, no de ese
-parámetro).
+parámetro). El nombre del modelo y los límites de tokens viven en
+`config.py`, no hardcodeados en cada script.
 
 ### Paso 9 — Agente conversacional sobre el forecast
 
@@ -216,13 +225,26 @@ CSV, y el resultado vuelve al modelo para que decida el próximo paso o ya
 responda en texto. El loop tiene un límite de seguridad de 5 vueltas para
 evitar cualquier ejecución descontrolada.
 
+**Reparto de responsabilidades:** el modelo decide *qué* consultar y redacta
+la respuesta; todos los cálculos los hace el código Python sobre los datos
+reales. El modelo nunca estima ni infiere un número.
+
 **Ejemplo real de comportamiento agéntico observado:** ante la pregunta
-abierta *"¿cuál es el peor trimestre del 2026?"* (sin especificar un
-trimestre), el agente decidió por sí mismo consultar los 4 trimestres del
-año por separado, en una sola tanda de llamadas en paralelo, y comparó los
-resultados para determinar cuál era el peor — una secuencia de pasos que
-nunca se programó explícitamente, sino que el modelo planificó a partir de
-entender qué necesitaba para responder bien.
+abierta *"¿cuáles son los trimestres de mayor riesgo?"*, el agente decidió
+primero filtrar por umbral de probabilidad y, con esos dos trimestres
+identificados, encadenó dos consultas de detalle para comparar sus
+cuantiles — una secuencia que nunca se programó explícitamente, sino que el
+modelo planificó a partir de entender qué necesitaba para responder bien.
+
+**Trazabilidad:** cada vuelta del loop se persiste en `agent_log.jsonl`
+(timestamp, pregunta, herramienta invocada, parámetros y resultado). Sin
+ese registro, el comportamiento del agente solo existiría en la consola y
+desaparecería al cerrar la terminal. Con él, se puede auditar por qué
+respondió lo que respondió y detectar ineficiencias — por ejemplo, en las
+primeras corridas el log mostró que el agente tanteaba umbrales a ciegas
+porque la descripción de la herramienta no declaraba el rango de
+probabilidades presente en los datos; agregar ese rango a la descripción
+eliminó las llamadas redundantes.
 
 ---
 
@@ -244,33 +266,49 @@ por completo en la temporada de huracanes (Q3), con una cola de pérdidas
 potenciales órdenes de magnitud por encima del escenario típico incluso en
 los trimestres de menor riesgo.
 
+---
+
 ## Validación y limitaciones del modelo de cola
 
 ### Anclaje empírico
 
-La curva de excedencia se validó contra el peor evento observado en la 
-serie. El resultado no es un ajuste posterior: la función de probabilidad 
-se estimó sobre las 20 excedencias del percentil 90 y luego se consultó 
-en puntos de referencia independientes.
+La curva de excedencia se validó contra el peor evento observado en la
+serie. El resultado no es un ajuste posterior: la función de probabilidad
+se estimó sobre las 20 excedencias del percentil 90 y luego se consultó en
+puntos de referencia independientes.
 
 | Pérdida trimestral | Período de retorno estimado |
 |---|---|
 | $4,000M — *attachment point* real de FEMA | ~10 años |
 | $10,000M | ~19 años |
-| **$17,003M — 2005Q3 (Katrina), máximo histórico** | **~28 años** |
+| **$28,025M — 2005Q3 (Katrina), máximo histórico** | **~38 años** |
 | $75,000M — P99 proyectado Q3 2026 | ~71 años |
 | $86,000M — P99 proyectado Q3 2027 | ~77 años |
 
 Dos observaciones sostienen la validez del modelo en el rango observado:
 
-1. **Consistencia con la frecuencia empírica.** El máximo histórico se estima en ~28 años de período de retorno sobre una ventana de 192 trimestres (48 años) en la que ocurrió una vez. Bajo un proceso de Poisson con tasa esperada de 1.7 ocurrencias, observar exactamente una es el resultado más probable (P ≈ 0.31).
+1. **Consistencia con la frecuencia empírica.** El máximo histórico se
+   estima en ~38 años de período de retorno sobre una ventana de 192
+   trimestres (48 años, excluyendo los 2 últimos por rezago de reporte) en
+   la que ocurrió una vez. Bajo un proceso de Poisson con tasa esperada de
+   1.26 ocurrencias, observar exactamente una es el resultado más probable
+   (P ≈ 0.36).
 
-2. **Calibración contra una referencia externa independiente.** El 
-   umbral de $4,000M —*attachment point* efectivamente utilizado por FEMA en su programa de reinsurance— se estima en ~10 años de período de retorno, sin que la información de FEMA haya entrado en el ajuste.
+2. **Calibración contra una referencia externa independiente.** El umbral
+   de $4,000M —*attachment point* efectivamente utilizado por FEMA en su
+   programa de reinsurance— se estima en ~10 años de período de retorno,
+   sin que la información de FEMA haya entrado en el ajuste.
+
+**Nota sobre unidades.** Todas las cifras de esta sección están expresadas
+en dólares constantes ajustados por inflación (`total_paid_real`),
+consistente con la serie sobre la que se ajustó el modelo. Las cifras
+nominales de fuentes externas (p. ej. Congressional Research Service) no
+son directamente comparables con estos valores.
 
 ### Incertidumbre paramétrica
 
-El parámetro de forma de la GPD se estima sobre 20 excedencias. Un bootstrap no paramétrico de 2,000 remuestreos arroja:
+El parámetro de forma de la GPD se estima sobre 20 excedencias. Un
+bootstrap no paramétrico de 2,000 remuestreos arroja:
 
 - **xi puntual:** 1.605
 - **IC 95%:** [0.259, 3.288]
@@ -279,21 +317,62 @@ El parámetro de forma de la GPD se estima sobre 20 excedencias. Un bootstrap no
 
 ![Distribución bootstrap del parámetro de forma](bootstrap_xi.png)
 
-El intervalo abarca un orden de magnitud y cruza los dos umbrales críticos de la GPD. En el extremo inferior el modelo describe una cola con momentos finitos; en el superior, una cola sin media definida. Los datos disponibles no permiten discriminar entre ambos regímenes.
+El intervalo abarca un orden de magnitud y cruza los dos umbrales críticos
+de la GPD. En el extremo inferior el modelo describe una cola con momentos
+finitos; en el superior, una cola sin media definida. Los datos disponibles
+no permiten discriminar entre ambos regímenes.
+
+Este resultado respalda cuantitativamente la decisión del Paso 7 de excluir
+la media del reporte final: no se trata de un valor puntual desafortunado,
+sino de que la mayor parte de la evidencia disponible apunta al régimen sin
+media finita.
 
 ### Alcance declarado
 
-El modelo se considera **consistente** con la historia observada en el rango hasta el máximo histórico, y **no validado** para extrapolación más allá de él. Los cuantiles por encima de $17,000M deben leerse como órdenes de magnitud útiles para dimensionar escenarios de estrés, no como estimaciones puntuales.
+El modelo se considera **consistente** con la historia observada en el
+rango hasta el máximo histórico, y **no validado** para extrapolación más
+allá de él. Los cuantiles por encima de $28,000M deben leerse como órdenes
+de magnitud útiles para dimensionar escenarios de estrés, no como
+estimaciones puntuales.
 
-Esta limitación es estructural, no un defecto de implementación: la estimación de colas pesadas con pocas excedencias es un problema conocido en teoría de valores extremos. Se documenta explícitamente en lugar de reportar un cuantil puntual sin su incertidumbre asociada.
+Esta limitación es estructural, no un defecto de implementación: la
+estimación de colas pesadas con pocas excedencias es un problema conocido
+en teoría de valores extremos. Se documenta explícitamente en lugar de
+reportar un cuantil puntual sin su incertidumbre asociada.
 
 ### Nota metodológica sobre ventanas de datos
 
-El componente SARIMA se ajusta sobre la ventana desde 2004, donde se identifica un quiebre estructural en la dinámica del programa. El componente EVT utiliza la serie completa (192 trimestres): restringir la cola a la ventana corta reduciría el número de excedencias disponibles y descartaría eventos extremos que son precisamente la información que el ajuste necesita.
+El componente SARIMA se ajusta sobre la ventana desde 2004, donde se
+identifica un quiebre estructural en la dinámica del programa. El
+componente EVT utiliza la serie completa (192 trimestres): restringir la
+cola a la ventana corta reduciría el número de excedencias disponibles y
+descartaría eventos extremos que son precisamente la información que el
+ajuste necesita.
+
+### Definición de `n_claims` y `avg_severity`
+
+La serie de frecuencia cuenta reclamos *presentados*, no reclamos
+*pagados*: el 22.3% de los 2,721,780 registros del dataset NFIP tiene pago
+total de $0 (denegaciones, daños por debajo del deducible, o siniestros sin
+cobertura aplicable). En consecuencia, `avg_severity` refleja el costo
+promedio por reclamo presentado ($32,954) y no por reclamo pagado
+($42,423).
+
+Esta elección no afecta el forecast de pérdidas agregadas, que es la
+variable objetivo del modelo: la suma de pagos es idéntica con o sin los
+registros de pago cero. Sí debe tenerse en cuenta al interpretar las
+componentes de frecuencia y severidad por separado, y al comparar con
+fuentes externas que reporten sobre reclamos pagados.
+
+Los reclamos denegados se mantienen deliberadamente en la serie: la
+proporción que resulta en pago varía según el tipo de evento, y filtrarlos
+ocultaría esa dinámica.
+
+---
 
 ## Bugs reales encontrados en el camino
 
-Documentados a propósito, porque son parte genuina del procesode
+Documentados a propósito, porque son parte genuina del proceso de
 construir esto, no un anexo de errores vergonzosos:
 
 1. **Error 503 de la API de FEMA** por paginación profunda → resuelto
@@ -314,6 +393,12 @@ construir esto, no un anexo de errores vergonzosos:
    usada por el modelo en sentido matemático (proporción) se leía en
    español como "motivo/causa" — corregido con una instrucción explícita
    en el prompt.
+6. **Ancla histórica sobre la serie equivocada**: la primera versión de la
+   validación comparaba la curva de excedencia (ajustada sobre dólares
+   constantes) contra el máximo de la serie *nominal*, subestimando el
+   peor evento histórico en un 40%. Se detectó al verificar que ambas
+   series tuvieran el mismo máximo, y motivó la incorporación de tests de
+   sanidad automáticos.
 
 ---
 
@@ -326,29 +411,37 @@ changepoint detection) · Anthropic API (Claude) · Jupyter / VS Code.
 
 ## Estructura del repositorio
 
-```
+'''
 nfip-forecast-project/
-├── nfip_extract.py                  # Descarga y agregación trimestral
-├── nfip_inflation_adjustment.py     # Ajuste CPI-U a dólares reales
-├── nfip_modeling.ipynb              # Changepoint, SARIMA freq/severidad, EVT, combinación
-├── nfip_genai_narrative.py          # Narrativa ejecutiva vía API de Claude
-├── nfip_agent.py                    # Agente conversacional con tool use sobre el forecast
-├── nfip_quarterly_adjusted.csv      # Dataset trimestral ajustado por inflación
+├── config.py # Configuración centralizada (modelo, límites)
+├── nfip_extract.py # Descarga y agregación trimestral
+├── nfip_inflation_adjustment.py # Ajuste CPI-U a dólares reales
+├── nfip_modeling.ipynb # Changepoint, SARIMA freq/severidad, EVT, combinación
+├── nfip_genai_narrative.py # Narrativa ejecutiva vía API de Claude
+├── nfip_agent.py # Agente conversacional con tool use sobre el forecast
+├── test_sanidad.py # Tests de consistencia sobre el forecast
+├── nfip_quarterly_adjusted.csv # Dataset trimestral ajustado por inflación
 ├── nfip_final_combined_forecast.csv # Forecast final (percentiles + prob. catastrófica)
-├── nfip_executive_summary.txt       # Última narrativa generada
+├── evt_validacion.json # Resultados de validación y bootstrap
+├── bootstrap_xi.png # Distribución bootstrap del parámetro de cola
+├── nfip_executive_summary.txt # Última narrativa generada
+├── requirements.txt # Dependencias con versiones fijadas
 └── README.md
-```
+'''
+
 
 ---
 
 ## Cómo correr el proyecto
 
 ```bash
-pip install pandas statsmodels scipy ruptures anthropic
+pip install -r requirements.txt
 
 python nfip_extract.py
 python nfip_inflation_adjustment.py
 # correr nfip_modeling.ipynb de punta a punta (Restart & Run All)
+
+python test_sanidad.py                  # verifica consistencia del forecast
 
 export ANTHROPIC_API_KEY="tu-key-acá"   # nunca commitear la key -- ver .gitignore
 python nfip_genai_narrative.py
@@ -368,3 +461,10 @@ cada vez que se actualice el forecast — y que el resultado se inserte
 directo en un dashboard de BI (Power BI/Tableau) en vez de vivir en un
 archivo de texto suelto, para que un ejecutivo lo vea sin tener que correr
 ningún script.
+
+Sobre el modelo mismo, dos líneas de trabajo quedan abiertas: reducir la
+incertidumbre del parámetro de cola incorporando datos de eventos
+catastróficos de otras jurisdicciones o agregando a nivel anual, y
+persistir las distribuciones simuladas por trimestre (hoy el loop de Monte
+Carlo sobrescribe el resultado en cada iteración, lo que impide revalidar
+sin volver a correr la simulación completa).
