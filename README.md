@@ -17,12 +17,12 @@ mismo qué calcular en cada caso.
 2. [Enfoque y arquitectura del modelo](#enfoque-y-arquitectura-del-modelo)
 3. [Pipeline paso a paso](#pipeline-paso-a-paso)
 4. [Resultado principal](#resultado-principal)
-5. [Bugs reales encontrados en el camino](#bugs-reales-encontrados-en-el-camino)
-6. [Stack técnico](#stack-técnico)
-7. [Estructura del repositorio](#estructura-del-repositorio)
-8. [Cómo correr el proyecto](#cómo-correr-el-proyecto)
-9. [Próximos pasos naturales en producción](#próximos-pasos-naturales-en-producción)
-
+5. [Validación y limitaciones del modelo de cola](#validación-y-limitaciones-del-modelo-de-cola)
+6. [Bugs reales encontrados en el camino](#bugs-reales-encontrados-en-el-camino)
+7. [Stack técnico](#stack-técnico)
+8. [Estructura del repositorio](#estructura-del-repositorio)
+9. [Cómo correr el proyecto](#cómo-correr-el-proyecto)
+10. [Próximos pasos naturales en producción](#próximos-pasos-naturales-en-producción)
 ---
 
 ## Contexto de negocio
@@ -244,11 +244,56 @@ por completo en la temporada de huracanes (Q3), con una cola de pérdidas
 potenciales órdenes de magnitud por encima del escenario típico incluso en
 los trimestres de menor riesgo.
 
----
+## Validación y limitaciones del modelo de cola
+
+### Anclaje empírico
+
+La curva de excedencia se validó contra el peor evento observado en la 
+serie. El resultado no es un ajuste posterior: la función de probabilidad 
+se estimó sobre las 20 excedencias del percentil 90 y luego se consultó 
+en puntos de referencia independientes.
+
+| Pérdida trimestral | Período de retorno estimado |
+|---|---|
+| $4,000M — *attachment point* real de FEMA | ~10 años |
+| $10,000M | ~19 años |
+| **$17,003M — 2005Q3 (Katrina), máximo histórico** | **~28 años** |
+| $75,000M — P99 proyectado Q3 2026 | ~71 años |
+| $86,000M — P99 proyectado Q3 2027 | ~77 años |
+
+Dos observaciones sostienen la validez del modelo en el rango observado:
+
+1. **Consistencia con la frecuencia empírica.** El máximo histórico se estima en ~28 años de período de retorno sobre una ventana de 192 trimestres (48 años) en la que ocurrió una vez. Bajo un proceso de Poisson con tasa esperada de 1.7 ocurrencias, observar exactamente una es el resultado más probable (P ≈ 0.31).
+
+2. **Calibración contra una referencia externa independiente.** El 
+   umbral de $4,000M —*attachment point* efectivamente utilizado por FEMA en su programa de reinsurance— se estima en ~10 años de período de retorno, sin que la información de FEMA haya entrado en el ajuste.
+
+### Incertidumbre paramétrica
+
+El parámetro de forma de la GPD se estima sobre 20 excedencias. Un bootstrap no paramétrico de 2,000 remuestreos arroja:
+
+- **xi puntual:** 1.605
+- **IC 95%:** [0.259, 3.288]
+- **Corridas en régimen de media infinita (xi ≥ 1):** 73.6%
+- **Corridas en régimen de varianza infinita (xi ≥ 0.5):** 93.6%
+
+![Distribución bootstrap del parámetro de forma](bootstrap_xi.png)
+
+El intervalo abarca un orden de magnitud y cruza los dos umbrales críticos de la GPD. En el extremo inferior el modelo describe una cola con momentos finitos; en el superior, una cola sin media definida. Los datos disponibles no permiten discriminar entre ambos regímenes.
+
+### Alcance declarado
+
+El modelo se considera **consistente** con la historia observada en el rango hasta el máximo histórico, y **no validado** para extrapolación más allá de él. Los cuantiles por encima de $17,000M deben leerse como órdenes de magnitud útiles para dimensionar escenarios de estrés, no como estimaciones puntuales.
+
+Esta limitación es estructural, no un defecto de implementación: la estimación de colas pesadas con pocas excedencias es un problema conocido en teoría de valores extremos. Se documenta explícitamente en lugar de reportar un cuantil puntual sin su incertidumbre asociada.
+
+### Nota metodológica sobre ventanas de datos
+
+El componente SARIMA se ajusta sobre la ventana desde 2004, donde se identifica un quiebre estructural en la dinámica del programa. El componente EVT utiliza la serie completa (192 trimestres): restringir la cola a la ventana corta reduciría el número de excedencias disponibles y descartaría eventos extremos que son precisamente la información que el ajuste necesita.
 
 ## Bugs reales encontrados en el camino
 
-Documentados a propósito, porque son parte genuina del proceso de
+Documentados a propósito, porque son parte genuina del procesode
 construir esto, no un anexo de errores vergonzosos:
 
 1. **Error 503 de la API de FEMA** por paginación profunda → resuelto
