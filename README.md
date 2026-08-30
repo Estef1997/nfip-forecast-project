@@ -246,6 +246,10 @@ porque la descripción de la herramienta no declaraba el rango de
 probabilidades presente en los datos; agregar ese rango a la descripción
 eliminó las llamadas redundantes.
 
+Para una explicación detallada de los patrones agénticos aplicados en este
+proyecto y las decisiones de diseño detrás de ellos, ver
+[AGENTIC_PATTERNS.md](AGENTIC_PATTERNS.md).
+
 ---
 
 ## Resultado principal
@@ -411,7 +415,7 @@ changepoint detection) · Anthropic API (Claude) · Jupyter / VS Code.
 
 ## Estructura del repositorio
 
-'''
+```
 nfip-forecast-project/
 ├── config.py # Configuración centralizada (modelo, límites)
 ├── nfip_extract.py # Descarga y agregación trimestral
@@ -427,7 +431,7 @@ nfip-forecast-project/
 ├── nfip_executive_summary.txt # Última narrativa generada
 ├── requirements.txt # Dependencias con versiones fijadas
 └── README.md
-'''
+```
 
 
 ---
